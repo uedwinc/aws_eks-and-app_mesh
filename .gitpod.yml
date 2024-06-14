@@ -9,6 +9,6 @@ tasks:
     before: |
       source ./bin/install_kubectl
 
-  - name: kubectl
+  - name: eksctl
     before: |
       source ./bin/install_eksctl
