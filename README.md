@@ -379,3 +379,43 @@ envsubst < ./deployment/canary.yaml | kubectl apply -f -
 
 We have installed an App Mesh controller and ported an application into App Mesh. We then deployed v2 of the proddetail service and distributed half of the traffic between v1 and v2. Now, to trace the traffic flow between all the services, we can use the AWS X-Ray service.
 
+# Getting observability using X-Ray
+
+We use the X-Ray SDK to instrument our application code and share all the incoming and outgoing requests to the X-Ray daemon, which is running as the third container of the deployment. We already installed App Mesh with the X-Ray feature. We can see the service mapping by performing the following steps:
+
+1. Log in to the AWS console and go to the X-Ray service page.
+
+2. Click on `Service map`.
+
+(...)
+
+The preceding service graph shows the traffic in the following manner when the request comes to loadbalancer:
+
+  1. When the request comes to loadbalancer, it routes the traffic to the `ingress-gw` Envoy proxy of the virtual gateway, and then it gets routed to the Envoy proxy of `frontend-Node`
+
+  2. Then, the Envoy proxy of `frontend-Node` routes the traffic to the `frontend-Node` service.
+
+  3. The `frontend-node` service would like to talk to the `prodcatalog` service, so instead of going directly, the Envoy proxy of `frontend-node` will connect to the Envoy proxy of the `prodcatalog` service.
+
+  4. The Envoy proxy of the `prodcatalog` service will route the traffic to the `prodcatalog` service.
+
+  5. Then, the `prodcatalog` service makes a request to `proddetail` v1  to retrieve the catalog detail information for version 1.
+
+  6. Instead of directly reaching out to the  `proddetail` v1  service, the request goes to the `prodcatalog` Envoy proxy and the proxy routes the call to the `proddetail` Envoy proxy.
+
+  7. Then, the Envoy proxy of `prodetail` v1  receives the request and routes it to the `proddetail` v1 service.
+
+  8. Similar steps of the workflow happen when  `proddetail` v2  is accessed when we click on the `Canary Deployment` button.
+
+You can get trace details from the service by clicking on the circular `prodcatalog-mesh/frontend-node_prodcatalog-ns` field and then clicking on `View traces`.
+
+(...)
+
+Once you click on `View traces`, you will see the whole request list routed from `frontend-node`
+
+(...)
+
+Click on any trace list to see the details of the trace. The details of the trace look something like the following:
+
+(...)
+
