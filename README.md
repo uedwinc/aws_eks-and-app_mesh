@@ -419,3 +419,123 @@ Click on any trace list to see the details of the trace. The details of the trac
 
 (...)
 
+# Enabling mTLS authentication between services
+
+We will enable TLS encryption with mutual authentication between service endpoints in App Mesh using X.509 certificates. We will be using a separate application called `colorapp` and deploying it on the same EKS cluster.
+
+We've seen how in App Mesh the traffic is mediated and terminated via an Envoy proxy, which means our application code is not responsible for handling and negotiating a TLS-encrypted connection. An Envoy proxy negotiates and terminates the TLS on behalf of the application.
+
+There are two possible certificate sources for mTLS authentication:
+
+  - `Filesystem`: Certificates will be in the local filesystem of the Envoy proxy. To provide certificates to the Envoy proxy, you need to provide the file path of the certificate chain and a private key to the App Mesh API.
+
+  - `Envoy's Secret Discovery Service (SDS)`: You need to bring your own sidecar container that implements SDS and sends the certificates to the envoy.
+
+We will configure an envoy to use the file-based strategy via Kubernetes Secrets to set up certificates by performing the following steps:
+
+1. We will be deploying four services (`frontend`, `blue`, `green`, and `red`) to demonstrate mTLS between the services. We will try to call the `blue` and `green` services from the frontend and verify the mTLS authentication between them. To verify the mTLS, we need to create two separate `certificate authorities (CAs)`. The first certificate authority will be used to sign the certificate for the `blue` app and the frontend. The second certificate authority will be used to sign the certificate for the `green` app:
+
+```sh
+export AWS_ACCOUNT_ID=<Your account id>
+export AWS_DEFAULT_REGION=us-east-2
+cd mtls-file-based
+chmod 744 mtls/certs.sh
+./mtls/certs.sh
+```
+
+2. This script will generate some files:
+
+  - `*_cert.pem` : These are the public key of the certificates.
+  - `*_key.pem` : These are the private key of the certificates.
+  - `*_cert_chain.pem` : These files are a list of public certificates that are used to sign the private key.
+  - `ca1_1_ca_2_bundle.pem` : This contains public certificates for both CAs.
+
+- You can add the generated files to .gitignore
+
+Verify that the `blue` and `frontend` certificates are signed by `CA1` and the `green` certificate is signed by `CA2`
+
+```sh
+openssl verify -verbose -CAfile ca_1_cert.pem colorapp-blue_cert.pem
+
+openssl verify -verbose -CAfile ca_1_cert.pem front_cert.pem
+
+openssl verify -verbose -CAfile ca_2_cert.pem colorapp-green_cert.pem
+
+```
+
+(...)
+
+3. Now we will store these certificates as a Kubernetes Secret so that we can mount them in the Envoy proxy containers:
+
+```sh
+chmod 744 mtls/deploy.sh
+./mtls/deploy.sh
+
+kubectl get secrets -n mtls
+```
+
+4. Once we have the certificates stored in a Kubernetes Secret, we need to deploy the application services, create a service mesh, then create four virtual nodes ( `frontend` , `blue` , `green` , and `red` ), one virtual service ( `color` ), and one virtual router ( `color` ). The virtual node frontend is configured with the virtual service ( `color` ) as the backend. The `color` virtual service has a virtual router ( `color` ) as the provider. The `color` virtual router has three routes configured, which routes to the `nodeblue` , `green` , and `red` virtual nodes, respectively. 
+
+The following script will create all the mesh resources for you:
+
+```sh
+chmod 744 mesh.sh
+./mesh.sh up
+```
+
+5. The following is the specification of the `blue` virtual Node, where you can see how we have mentioned the certificate details: [manifest.yaml.template](/mtls-file-based/v1beta2/manifest.yaml.template) (Line 65:89-95)
+
+6. The following is the specification of the blue app, where you can see how we have mentioned the certificate secret using the `appmesh.k8s.aws/secretMounts` annotation: [manifest.yaml.template](/mtls-file-based/v1beta2/manifest.yaml.template)(Line 328:342)
+
+7. Once we have the mesh deployed, let's get the Pod identities, which we will use in upcoming commands:
+
+```sh
+FRONT_POD=$(kubectl get pod -l "app=front" -n mtls --output=jsonpath={.items..metadata.name})
+
+BLUE_POD=$(kubectl get pod -l "version=blue" -n mtls --output=jsonpath={.items..metadata.name})
+
+RED_POD=$(kubectl get pod -l "version=red" -n mtls --output=jsonpath={.items..metadata.name})
+
+GREEN_POD=$(kubectl get pod -l "version=green" -n mtls --output=jsonpath={.items..metadata.name})
+```
+
+8. Let's verify mTLS by making traffic from the frontend to the color application:
+
+```sh
+# Deploying curler pod to create traffic within cluster
+kubectl run -i --tty curler --image=public.ecr.aws/k8m1l3p1/alpine/curler:latest –rm
+
+curl -H "color_header: blue" front.mtls.svc.cluster.local:8080/; echo;
+# Blue
+# You are seeing a SUCCESSFUL response
+```
+
+9. When we tried to request the `blue` service via the frontend, we got a success response, as the frontend is configured with CA1 in its validation context and blue is signed by CA1 . Now let's try to access the `green` service from the frontend:
+
+```sh
+# Deploying curler pod to create traffic within cluster
+kubectl run -i --tty curler --image=public.ecr.aws/k8m1l3p1/alpine/curler:latest –rm
+
+curl -H "color_header: green" front.mtls.svc.cluster.local:8080/; echo;
+# Connection refused
+# You are seeing an error response
+```
+
+10. The frontend service is unable to read or respond to the `green` service because the green service certificate is signed by CA2 , which is not configured in the frontend service.
+
+11. Let's change the frontend client policy to allow the certificates from both CA1 and CA2
+
+```sh
+SKIP_IMAGES=1 ./mesh.sh addGreen
+
+# deploying curler pod to create traffic within cluster
+kubectl run -i --tty curler --image=public.ecr.aws/k8m1l3p1/alpine/curler:latest –rm
+
+# curl -H "color_header: green" front.mtls.svc.cluster.local:8080/; echo;
+Green
+# You are seeing a SUCCESSFUL response
+```
+
+12. You can see how to enable mTLS between services using a file-based method. 
+
+In this example, we generated the certificates and CAs by ourselves. But there will be a management issue when you need to rotate the certificate and the secrets. That's why the recommended way is to use `Amazon Certificate Manager (ACM)` as a private certificate provider and manager. You can refer to the following link: https://aws.amazon.com/blogs/security/how-to-use-acm-private-ca-for-enabling-mtls-in-aws-app-mesh/ to dig deep.
