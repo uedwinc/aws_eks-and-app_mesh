@@ -40,7 +40,7 @@ aws ec2 create-key-pair --key-name celestial --region us-east-2 > celestial.pem
 eksctl create cluster --name celestials --region us-east-2 --with-oidc --ssh-access --ssh-public-key celestial --managed
 ```
 
-The preceding command will show the status in `stdout`, but in parallel, it will create a CloudFormation stack (Confirm on the CloudFormation console), which basically spins up all the resources required for an EKS cluster, for example, a VPC, a security group, a worker Node group, and the EKS control plane
+The preceding command will show the status in `stdout`, but in parallel, it will create a CloudFormation stack (Confirm on the CloudFormation console), which basically spins up all the resources required for an EKS cluster, for example, a VPC, a security group, worker Node group, the EKS control plane, service accounts, etc.
 
 ![stacks](./images/eks.png)
 
@@ -178,3 +178,34 @@ kubectl get pods -n prodcatalog-ns
 kubectl get services -n prodcatalog-ns
 ```
 
+8. To verify that the application is working fine, we can do a remote session inside the frontend Pod and try to access the `prodcatalog` service:
+
+```sh
+frontendpod=$(kubectl get pods -n prodcatalog-ns -l app=frontend-node -o jsonpath='{.items[].metadata.name}')
+
+kubectl exec -it $frontendpod -c frontend-node -n prodcatalog-ns bash
+
+# Inside the frontend-node pod:
+curl http://prodcatalog.prodcatalog-ns.svc.cluster.local:5000/products/
+# This should return a json with "products" as empty dictionary and "details" including version = 1 and "vendors" as ABC.com
+```
+
+9. To test the connectivity from the prodcatalog service to `proddetail`, connect to the `prodcatalog` Pod and curl to `proddetail`
+
+```sh
+prodcat=$( kubectl get pods -n prodcatalog-ns -l app=prodcatalog -o jsonpath='{.items[].metadata.name}')
+
+kubectl exec -it $prodcat -c prodcatalog -n prodcatalog-ns bash
+
+# Inside the prodcatalog pod
+curl http://proddetail.prodcatalog-ns.svc.cluster.local:3000/catalogDetail
+#This should return a json similar to: {"version":"1","vendors":["ABC.com"]}
+```
+
+We have successfully deployed an application with three services.
+
+# Implementing traffic management
+
+We will enable a mesh in the EKS cluster. After that, we will create an App Mesh component, virtual service, virtual node, virtual router, and virtual gateway. We will also create another version of a service and perform weight-based traffic routing.
+
+## Installing the App Mesh controller

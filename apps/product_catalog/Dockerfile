@@ -17,7 +17,7 @@ RUN chmod +x /app/bootstrap.sh
 # ENV AGG_APP_URL='http://prodinfo.octank-mesh-ns.svc.cluster.local:3000/productAgreement'
 
 # Expose the necessary port
-EXPOSE 8080
+EXPOSE 5000
 
 # Set the entrypoint to run the bootstrap.sh script
 ENTRYPOINT ["/app/bootstrap.sh"]
