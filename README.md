@@ -178,6 +178,8 @@ kubectl get pods -n prodcatalog-ns
 kubectl get services -n prodcatalog-ns
 ```
 
+![kubectl-commands](./images/kubectl-commands.png)
+
 8. To verify that the application is working fine, we can do a remote session inside the frontend Pod and try to access the `prodcatalog` service:
 
 ```sh
@@ -189,6 +191,8 @@ kubectl exec -it $frontendpod -c frontend-node -n prodcatalog-ns bash
 curl http://prodcatalog.prodcatalog-ns.svc.cluster.local:5000/products/
 # This should return a json with "products" as empty dictionary and "details" including version = 1 and "vendors" as ABC.com
 ```
+
+![frontendnode-curl](./images/frontendnode-curl.png)
 
 9. To test the connectivity from the prodcatalog service to `proddetail`, connect to the `prodcatalog` Pod and curl to `proddetail`
 
@@ -202,6 +206,8 @@ curl http://proddetail.prodcatalog-ns.svc.cluster.local:3000/catalogDetail
 #This should return a json similar to: {"version":"1","vendors":["ABC.com"]}
 ```
 
+![prodcatalog-curl](./images/prodcatalog-curl.png)
+
 We have successfully deployed an application with three services.
 
 # Implementing traffic management
@@ -212,7 +218,7 @@ We will enable a mesh in the EKS cluster. After that, we will create an App Mesh
 
 The following diagram shows the traffic flow if we enable App Mesh and create all of its components:
 
-(...)
+![architectural-diagram-appmesh]()
 
 Perform the following steps to create an App Mesh controller in an EKS cluster:
 
@@ -276,6 +282,8 @@ kubectl get crds | grep appmesh
 kubectl -n appmesh-system get all
 ```
 
+![kubectl-appmesh](./images/kubectl-appmesh.png)
+
 At this stage, we have successfully installed an App Mesh controller on the EKS cluster. Now we port the Product Catalog application on App Mesh. But before that, we should understand the challenge that we are facing with the application and how App Mesh can overcome that challenge.
 
 > Currently, the Product Catalog application's `frontend-node` service is hardwired to make requests to the `prodcatalog` service and the `prodcatalog` service is hardwired to make requests to `proddetail` . So, every time we have to release a new version of the `proddetail` service, we have to release a new version of the `prodcatalog` service too to support both the new and old versions to point to its version-specific service endpoints. This works, but it's not optimal to maintain for the long term.
@@ -296,9 +304,11 @@ kubectl apply -f deployment/mesh.yaml
 kubectl describe mesh prodcatalog-mesh
 ```
 
+![describe-mesh](./images/describe-mesh.png)
+
 You can see that the mesh is available in the AWS App Mesh console:
 
-(...)
+![mesh-console](./images/mesh-console.png)
 
 3. Create the App Mesh resources (virtual service, virtual node, and virtual router):
 
@@ -308,9 +318,11 @@ kubectl apply -f deployment/meshed_app.yaml
 kubectl get virtualnode,virtualservice,virtualrouter -n prodcatalog-ns
 ```
 
-The following figure shows all three resources are also visible in the App Mesh console:
+The following figures show all three resources are also visible in the App Mesh console:
 
-(...)
+![virtual-services](./images/virtual-services.png)
+![virtual-routers](./images/virtual-routers.png)
+![virtual-nodes](./images/virtual-nodes.png)
 
 4. Since we have already enabled the mesh and created the mesh resources, any workload resource that gets spun up in the prodcatalog-ns namespace will have a proxy sidecar along with it. But since we created our resources before we enabled the service mesh, we have to restart the deployment to get the proxy sidecar along with the application Pods:
 
@@ -324,13 +336,15 @@ kubectl -n prodcatalog-ns rollout restart deployment frontend-node
 
 5. We can verify the number of Pods in a deployment. Before restarting, the number of Pods would be 1/1, but after restarting the deployment will have three Pods, where one is the application Pod, one is the Envoy proxy, and one is the X-Ray agent
 
-(...)
+![pods-3](./images/pods-3.png)
 
 6. We need to create a virtual gateway, which will create an ingress service and expose it as the load balancer type. We will use the AWS network load balancer to route the external internet traffic:
 
 ```sh
 kubectl apply -f deployment/virtual_gateway.yaml
 ```
+
+![virtual-gateway](./images/virtual-gateway.png)
 
 7. We can access the application via `loadbalancer` created through the ingress service:
 
@@ -342,11 +356,11 @@ echo $LB_NAME
 
 8. Access the `loadbalancer` endpoint in the browser and you will be able to access the application.
 
-(...)
+![lb-endpoint](./images/lb-endpoint.png)
 
 - Add products:
 
-(...)
+![add-products](./images/add-products.png)
 
 9. Now let's deploy v2 of the *proddetail* service and distribute 50% of the traffic from v1 to v2. Go to the same folder where our application exists and run the following command to create a v2 Docker image and push it to ECR so that we can deploy on an EKS cluster:
 
@@ -373,9 +387,11 @@ done
 envsubst < ./deployment/canary.yaml | kubectl apply -f -
 ```
 
+![deploy-v2](./images/deploy-v2.png)
+
 11. Now we can verify the equal traffic distribution between v1 and v2 by again refreshing the `loadbalancer` endpoint. You can see a new button for the canary deployment. Click on the Canary Deployment button for couple of time you will be able to see different vendor name which is configured in proddetail-v2 service.
 
-(...)
+![canary-v2](./images/canary-v2.png)
 
 We have installed an App Mesh controller and ported an application into App Mesh. We then deployed v2 of the proddetail service and distributed half of the traffic between v1 and v2. Now, to trace the traffic flow between all the services, we can use the AWS X-Ray service.
 
@@ -387,7 +403,8 @@ We use the X-Ray SDK to instrument our application code and share all the incomi
 
 2. Click on `Service map`.
 
-(...)
+![trace-map](./images/trace-map.png)
+![trace-map-2](./images/trace-map-2.png)
 
 The preceding service graph shows the traffic in the following manner when the request comes to loadbalancer:
 
@@ -409,15 +426,16 @@ The preceding service graph shows the traffic in the following manner when the r
 
 You can get trace details from the service by clicking on the circular `prodcatalog-mesh/frontend-node_prodcatalog-ns` field and then clicking on `View traces`.
 
-(...)
+![traces-frontendnode](./images/trace-frontendnode.png)
 
 Once you click on `View traces`, you will see the whole request list routed from `frontend-node`
 
-(...)
+![traces-32](./images/traces-32.png)
 
 Click on any trace list to see the details of the trace. The details of the trace look something like the following:
 
-(...)
+![trace-details](./images/trace-details.png)
+![trace-details](./images/trace-details-1.png)
 
 # Enabling mTLS authentication between services
 
@@ -463,7 +481,7 @@ openssl verify -verbose -CAfile ca_2_cert.pem colorapp-green_cert.pem
 
 ```
 
-(...)
+![openssl-verify](./images/openssl-verify.png)
 
 3. Now we will store these certificates as a Kubernetes Secret so that we can mount them in the Envoy proxy containers:
 
@@ -473,6 +491,8 @@ chmod 744 mtls/deploy.sh
 
 kubectl get secrets -n mtls
 ```
+
+![get-secrets](./images/get-secrets.png)
 
 4. Once we have the certificates stored in a Kubernetes Secret, we need to deploy the application services, create a service mesh, then create four virtual nodes ( `frontend` , `blue` , `green` , and `red` ), one virtual service ( `color` ), and one virtual router ( `color` ). The virtual node frontend is configured with the virtual service ( `color` ) as the backend. The `color` virtual service has a virtual router ( `color` ) as the provider. The `color` virtual router has three routes configured, which routes to the `nodeblue` , `green` , and `red` virtual nodes, respectively. 
 
